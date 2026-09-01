@@ -64,6 +64,26 @@ def ensure_watchlist_table():
     )
 
 
+def ensure_news_table():
+    """Create the ticker news table in Lakebase if it doesn't exist yet."""
+    lakebase.run_write(
+        f"""
+        CREATE TABLE IF NOT EXISTS {NEWS_TABLE_NAME} (
+            id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            title TEXT NOT NULL,
+            author TEXT,
+            published_utc TIMESTAMPTZ,
+            article_url TEXT,
+            image_url TEXT,
+            description TEXT,
+            keywords TEXT[],
+            fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+
+
 def _current_user_email() -> str:
     """
     Resolve the current user's email so the watchlist can be personalized.
