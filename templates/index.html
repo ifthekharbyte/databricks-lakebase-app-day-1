@@ -233,6 +233,27 @@
       font-size: 13px;
     }
 
+    .delete-btn {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+
+    .delete-btn:hover {
+      background: #dc2626;
+      transform: scale(1.05);
+    }
+
+    .delete-btn:active {
+      transform: scale(0.98);
+    }
+
     .empty-state {
       text-align: center;
       padding: 60px 20px;
@@ -287,6 +308,7 @@
               <th>Email</th>
               <th>Latest Price</th>
               <th>Updated</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="watchlist-body"></tbody>
@@ -310,7 +332,7 @@
         }
         watchlistBody.innerHTML = "";
         if (data.length === 0) {
-          watchlistBody.innerHTML = '<tr><td colspan="4" class="empty-state">No stocks in your watchlist yet. Add one above!</td></tr>';
+          watchlistBody.innerHTML = '<tr><td colspan="5" class="empty-state">No stocks in your watchlist yet. Add one above!</td></tr>';
         } else {
           data.forEach((row) => {
             const tr = document.createElement("tr");
@@ -318,7 +340,7 @@
               ? "$" + Number(row.latest_price).toFixed(2)
               : "-";
             const updated = row.updated_at ? new Date(row.updated_at).toLocaleString() : "-";
-            tr.innerHTML = `<td>${row.symbol}</td><td>${row.email || "-"}</td><td>${price}</td><td>${updated}</td>`;
+            tr.innerHTML = `<td>${row.symbol}</td><td>${row.email || "-"}</td><td>${price}</td><td>${updated}</td><td><button class="delete-btn" onclick="deleteStock('${row.symbol}')">🗑️ Delete</button></td>`;
             watchlistBody.appendChild(tr);
           });
         }
@@ -335,6 +357,29 @@
           resultEl.className = '';
         }
       }, 5000);
+    }
+
+    async function deleteStock(symbol) {
+      if (!confirm(`Are you sure you want to remove ${symbol} from your watchlist?`)) {
+        return;
+      }
+
+      showResult(`Removing ${symbol}...`, false);
+
+      try {
+        const resp = await fetch(`/watchlist/${symbol}`, {
+          method: "DELETE",
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          showResult("Error: " + (data.error || resp.statusText), true);
+          return;
+        }
+        showResult(`✅ Removed ${symbol} from watchlist`, false);
+        loadWatchlist();
+      } catch (err) {
+        showResult("Request failed: " + err, true);
+      }
     }
 
     form.addEventListener("submit", async (e) => {
