@@ -28,6 +28,7 @@ _w = WorkspaceClient()
 
 TABLE_NAME = os.environ.get("MASSIVE_TABLE_NAME", "massive_records")
 WATCHLIST_TABLE_NAME = os.environ.get("WATCHLIST_TABLE_NAME", "watchlist")
+NEWS_TABLE_NAME = os.environ.get("NEWS_TABLE_NAME", "ticker_news")
 
 # Basic stock ticker shape check: 1-10 uppercase letters, with an optional
 # ".X" or ".XX" share-class suffix (e.g. "BRK.B"). This rejects obviously
@@ -217,6 +218,101 @@ def delete_from_watchlist(symbol):
     )
     
     return jsonify({"success": True, "symbol": symbol, "message": f"Removed {symbol} from watchlist"})
+
+
+@app.route("/news/<symbol>", methods=["GET"])
+def get_news(symbol):
+    """
+    Fetch and store recent news for a ticker symbol from the Massive API.
+    Returns the fetched news articles.
+    """
+    ensure_news_table()
+    
+    symbol = symbol.strip().upper() if isinstance(symbol, str) else ""
+    
+    if not symbol or not _TICKER_RE.match(symbol):
+        return jsonify({"error": f"Invalid ticker symbol: {symbol!r}"}), 400
+    
+    client = MassiveClient()
+    try:
+        data = client.get_ticker_news(symbol, limit=10)
+    except requests.HTTPError as e:
+        return jsonify({"error": f"Failed to fetch news for {symbol}: {str(e)}"}), 400
+    
+    results = data.get("results", [])
+    
+    if not results:
+        return jsonify({"symbol": symbol, "news": [], "message": f"No news found for {symbol}"})
+    
+    # Store news articles in Lakebase
+    import json as _json
+    stored_count = 0
+    
+    for article in results:
+        article_id = article.get("id") or article.get("article_url", "")[:100]
+        if not article_id:
+            continue
+            
+        # Upsert article into news table
+        lakebase.run_write(
+            f"""
+            INSERT INTO {NEWS_TABLE_NAME} (
+                id, symbol, title, author, published_utc, 
+                article_url, image_url, description, keywords, fetched_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (id) DO UPDATE
+                SET fetched_at = EXCLUDED.fetched_at
+            """,
+            (
+                article_id,
+                symbol,
+                article.get("title", ""),
+                article.get("author", ""),
+                article.get("published_utc"),
+                article.get("article_url", ""),
+                article.get("image_url", ""),
+                article.get("description", ""),
+                article.get("keywords", []),
+            ),
+        )
+        stored_count += 1
+    
+    return jsonify({
+        "symbol": symbol,
+        "news": results,
+        "stored_count": stored_count,
+        "message": f"Fetched {len(results)} news articles for {symbol}"
+    })
+
+
+@app.route("/news/stored/<symbol>", methods=["GET"])
+def get_stored_news(symbol):
+    """
+    Retrieve previously stored news for a ticker from Lakebase.
+    """
+    ensure_news_table()
+    
+    symbol = symbol.strip().upper() if isinstance(symbol, str) else ""
+    
+    if not symbol or not _TICKER_RE.match(symbol):
+        return jsonify({"error": f"Invalid ticker symbol: {symbol!r}"}), 400
+    
+    limit = int(request.args.get("limit", 10))
+    
+    rows = lakebase.run_query(
+        f"""
+        SELECT id, symbol, title, author, published_utc, article_url, 
+               image_url, description, keywords, fetched_at
+        FROM {NEWS_TABLE_NAME}
+        WHERE symbol = %s
+        ORDER BY published_utc DESC
+        LIMIT %s
+        """,
+        (symbol, limit),
+    )
+    
+    return jsonify({"symbol": symbol, "news": rows, "count": len(rows)})
 
 
 def _extract_latest_price(data: dict) -> float | None:
